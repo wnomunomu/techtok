@@ -1,6 +1,6 @@
 services:
   app:
-    image: mcr.microsoft.com/devcontainers/java:1-21-bullseye
+    image: mcr.microsoft.com/devcontainers/java:3-21-bookworm
     container_name: techtok-app
     volumes:
       - ..:/workspace:cached
