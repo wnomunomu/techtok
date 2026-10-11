@@ -11,23 +11,31 @@ import java.time.LocalDateTime
 
 @Repository
 interface TechArticleRepository : JpaRepository<TechArticle, Long> {
-    @Query("SELECT t FROM TechArticle t ORDER BY t.createdAt DESC")
-    fun findAllOrderByCreatedAtDesc(pageable: Pageable): Page<TechArticle>
+    @Query(
+        "SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t WHERE t.summary IS NOT NULL ORDER BY t.createdAt DESC",
+    )
+    fun findAllOrderByCreatedAtDesc(pageable: Pageable): Page<ArticleView>
 
-    @Query("SELECT t FROM TechArticle t ORDER BY t.publishedAt DESC")
-    fun findAllOrderByPublishedAtDesc(pageable: Pageable): Page<TechArticle>
+    @Query(
+        "SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t WHERE t.summary IS NOT NULL ORDER BY t.publishedAt DESC",
+    )
+    fun findAllOrderByPublishedAtDesc(pageable: Pageable): Page<ArticleView>
 
-    @Query("SELECT t FROM TechArticle t WHERE t.createdAt <= :untilDate ORDER BY t.createdAt DESC")
+    @Query(
+        "SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t WHERE t.summary IS NOT NULL AND t.createdAt <= :untilDate ORDER BY t.createdAt DESC",
+    )
     fun findByCreatedAtUntil(
         @Param("untilDate") untilDate: LocalDateTime,
         pageable: Pageable,
-    ): Page<TechArticle>
+    ): Page<ArticleView>
 
-    @Query("SELECT t FROM TechArticle t WHERE t.publishedAt <= :untilDate ORDER BY t.publishedAt DESC")
+    @Query(
+        "SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t WHERE t.summary IS NOT NULL AND t.publishedAt <= :untilDate ORDER BY t.publishedAt DESC",
+    )
     fun findByPublishedAtUntil(
         @Param("untilDate") untilDate: LocalDateTime,
         pageable: Pageable,
-    ): Page<TechArticle>
+    ): Page<ArticleView>
 
     fun existsBySourceUrl(sourceUrl: String): Boolean
 
@@ -39,14 +47,16 @@ interface TechArticleRepository : JpaRepository<TechArticle, Long> {
 
     fun findTopByOrderByPublishedAtDesc(): TechArticle?
 
-    @Query("SELECT t FROM TechArticle t ORDER BY t.publishedAt DESC, t.id DESC")
-    fun findLatestForFeed(pageable: org.springframework.data.domain.Pageable): List<TechArticle>
+    @Query(
+        "SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t WHERE t.summary IS NOT NULL ORDER BY t.publishedAt DESC, t.id DESC",
+    )
+    fun findLatestForFeed(pageable: org.springframework.data.domain.Pageable): List<ArticleView>
 
     @Query(
         """
-            SELECT t FROM TechArticle t
-            WHERE t.publishedAt < :publishedAt
-                OR (t.publishedAt = :publishedAt AND t.id < :id)
+            SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t
+            WHERE t.summary IS NOT NULL AND (t.publishedAt < :publishedAt
+                OR (t.publishedAt = :publishedAt AND t.id < :id))
             ORDER BY t.publishedAt DESC, t.id DESC
             """,
     )
@@ -54,21 +64,21 @@ interface TechArticleRepository : JpaRepository<TechArticle, Long> {
         @Param("publishedAt") publishedAt: LocalDateTime,
         @Param("id") id: Long,
         pageable: org.springframework.data.domain.Pageable,
-    ): List<TechArticle>
+    ): List<ArticleView>
 
     @Query(
         """
-            SELECT t FROM TechArticle t
-            WHERE t.updatedAt IS NOT NULL
+            SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t
+            WHERE t.summary IS NOT NULL AND t.updatedAt IS NOT NULL
             ORDER BY t.updatedAt DESC, t.id DESC
             """,
     )
-    fun findUpdatedForFeed(pageable: org.springframework.data.domain.Pageable): List<TechArticle>
+    fun findUpdatedForFeed(pageable: org.springframework.data.domain.Pageable): List<ArticleView>
 
     @Query(
         """
-            SELECT t FROM TechArticle t
-            WHERE t.updatedAt IS NOT NULL AND (
+            SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t
+            WHERE t.summary IS NOT NULL AND t.updatedAt IS NOT NULL AND (
                 t.updatedAt < :updatedAt
                 OR (t.updatedAt = :updatedAt AND t.id < :id)
             )
@@ -79,22 +89,24 @@ interface TechArticleRepository : JpaRepository<TechArticle, Long> {
         @Param("updatedAt") updatedAt: LocalDateTime,
         @Param("id") id: Long,
         pageable: org.springframework.data.domain.Pageable,
-    ): List<TechArticle>
+    ): List<ArticleView>
 
-    @Query("SELECT t FROM TechArticle t ORDER BY t.stocksCount DESC, t.publishedAt DESC, t.id DESC")
-    fun findPopularForFeed(pageable: org.springframework.data.domain.Pageable): List<TechArticle>
+    @Query(
+        "SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t WHERE t.summary IS NOT NULL ORDER BY t.stocksCount DESC, t.publishedAt DESC, t.id DESC",
+    )
+    fun findPopularForFeed(pageable: org.springframework.data.domain.Pageable): List<ArticleView>
 
     @Query(
         """
-            SELECT t FROM TechArticle t
-            WHERE t.stocksCount < :stocksCount
+            SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t
+            WHERE t.summary IS NOT NULL AND (t.stocksCount < :stocksCount
                 OR (
                     t.stocksCount = :stocksCount
                     AND (
                         t.publishedAt < :publishedAt
                         OR (t.publishedAt = :publishedAt AND t.id < :id)
                     )
-                )
+                ))
             ORDER BY t.stocksCount DESC, t.publishedAt DESC, t.id DESC
             """,
     )
@@ -103,16 +115,18 @@ interface TechArticleRepository : JpaRepository<TechArticle, Long> {
         @Param("publishedAt") publishedAt: LocalDateTime,
         @Param("id") id: Long,
         pageable: org.springframework.data.domain.Pageable,
-    ): List<TechArticle>
+    ): List<ArticleView>
 
-    @Query("SELECT t FROM TechArticle t ORDER BY t.randomKey ASC, t.id ASC")
-    fun findRandomForFeed(pageable: org.springframework.data.domain.Pageable): List<TechArticle>
+    @Query(
+        "SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t WHERE t.summary IS NOT NULL ORDER BY t.randomKey ASC, t.id ASC",
+    )
+    fun findRandomForFeed(pageable: org.springframework.data.domain.Pageable): List<ArticleView>
 
     @Query(
         """
-            SELECT t FROM TechArticle t
-            WHERE t.randomKey > :randomKey
-                OR (t.randomKey = :randomKey AND t.id > :id)
+            SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t
+            WHERE t.summary IS NOT NULL AND (t.randomKey > :randomKey
+                OR (t.randomKey = :randomKey AND t.id > :id))
             ORDER BY t.randomKey ASC, t.id ASC
             """,
     )
@@ -120,7 +134,7 @@ interface TechArticleRepository : JpaRepository<TechArticle, Long> {
         @Param("randomKey") randomKey: Double,
         @Param("id") id: Long,
         pageable: org.springframework.data.domain.Pageable,
-    ): List<TechArticle>
+    ): List<ArticleView>
 
     @Modifying
     @Query(
@@ -140,5 +154,38 @@ interface TechArticleRepository : JpaRepository<TechArticle, Long> {
         @Param("limit") limit: Int,
     ): Int
 
-    fun findAllByOrderByCreatedAtDesc(): List<TechArticle>
+    @Query(
+        "SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t WHERE t.summary IS NOT NULL ORDER BY t.createdAt DESC",
+    )
+    fun findAllByOrderByCreatedAtDesc(): List<ArticleView>
+
+    @Query(
+        "SELECT new com.techtok.backend.domain.techarticle.ArticleView(t.id, t.title, t.summary, t.author, t.sourceUrl, t.publishedAt, t.updatedAt, t.stocksCount, t.randomKey, t.createdAt) FROM TechArticle t WHERE t.summary IS NOT NULL AND t.id = :id",
+    )
+    fun findCompletedById(
+        @Param("id") id: Long,
+    ): ArticleView?
+
+    @Query(
+        "SELECT new com.techtok.backend.domain.techarticle.PendingSummary(t.id, t.summarySource) FROM TechArticle t WHERE t.summary IS NULL AND t.summarySource IS NOT NULL AND t.id > :afterId ORDER BY t.id",
+    )
+    fun findPendingSummaries(
+        @Param("afterId") afterId: Long,
+        pageable: Pageable,
+    ): List<PendingSummary>
+
+    @Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("UPDATE TechArticle t SET t.summary = :summary WHERE t.id = :id AND t.summary IS NULL")
+    fun saveSummary(
+        @Param("id") id: Long,
+        @Param("summary") summary: String,
+    ): Int
+
+    @Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("DELETE FROM TechArticle t WHERE t.publishedAt < :cutoff")
+    fun deleteExpired(
+        @Param("cutoff") cutoff: LocalDateTime,
+    ): Int
 }

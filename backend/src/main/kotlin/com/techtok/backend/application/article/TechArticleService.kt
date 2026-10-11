@@ -10,6 +10,7 @@ import com.techtok.backend.application.article.response.RandomCursor
 import com.techtok.backend.application.article.response.TechArticleResponse
 import com.techtok.backend.application.article.response.UpdatedCursor
 import com.techtok.backend.application.openai.OpenAiService
+import com.techtok.backend.domain.techarticle.ArticleView
 import com.techtok.backend.domain.techarticle.TechArticle
 import com.techtok.backend.domain.techarticle.TechArticleRepository
 import org.slf4j.LoggerFactory
@@ -216,7 +217,7 @@ class TechArticleService(
                 decodedCursor?.random,
             )
 
-        val combined = LinkedHashMap<Long, TechArticle>()
+        val combined = LinkedHashMap<Long, ArticleView>()
         val allBuckets = listOf(latest, updated, popular, random)
         allBuckets.forEach { bucket ->
             bucket.forEach { article ->
@@ -264,11 +265,11 @@ class TechArticleService(
     }
 
     fun getArticleById(id: Long): TechArticleResponse? =
-        techArticleRepository.findById(id).orElse(null)?.let { article ->
+        techArticleRepository.findCompletedById(id)?.let { article ->
             toResponse(article)
         }
 
-    private fun toResponse(article: TechArticle): TechArticleResponse =
+    private fun toResponse(article: ArticleView): TechArticleResponse =
         TechArticleResponse(
             id = article.id,
             title = article.title,
@@ -284,7 +285,7 @@ class TechArticleService(
     private fun fetchLatestArticles(
         limit: Int,
         cursor: LatestCursor?,
-    ): List<TechArticle> {
+    ): List<ArticleView> {
         val pageable =
             org.springframework.data.domain.PageRequest
                 .of(0, limit)
@@ -298,7 +299,7 @@ class TechArticleService(
     private fun fetchUpdatedArticles(
         limit: Int,
         cursor: UpdatedCursor?,
-    ): List<TechArticle> {
+    ): List<ArticleView> {
         val pageable =
             org.springframework.data.domain.PageRequest
                 .of(0, limit)
@@ -316,7 +317,7 @@ class TechArticleService(
     private fun fetchPopularArticles(
         limit: Int,
         cursor: PopularCursor?,
-    ): List<TechArticle> {
+    ): List<ArticleView> {
         val pageable =
             org.springframework.data.domain.PageRequest
                 .of(0, limit)
@@ -330,7 +331,7 @@ class TechArticleService(
     private fun fetchRandomArticles(
         limit: Int,
         cursor: RandomCursor?,
-    ): List<TechArticle> {
+    ): List<ArticleView> {
         val pageable =
             org.springframework.data.domain.PageRequest
                 .of(0, limit)
@@ -365,26 +366,26 @@ class TechArticleService(
         return Base64.getUrlEncoder().withoutPadding().encodeToString(json.toByteArray())
     }
 
-    private fun toLatestCursor(article: TechArticle): LatestCursor =
+    private fun toLatestCursor(article: ArticleView): LatestCursor =
         LatestCursor(
             publishedAt = article.publishedAt.format(CURSOR_FORMATTER),
             id = article.id ?: 0,
         )
 
-    private fun toUpdatedCursor(article: TechArticle): UpdatedCursor =
+    private fun toUpdatedCursor(article: ArticleView): UpdatedCursor =
         UpdatedCursor(
             updatedAt = article.updatedAt?.format(CURSOR_FORMATTER) ?: "",
             id = article.id ?: 0,
         )
 
-    private fun toPopularCursor(article: TechArticle): PopularCursor =
+    private fun toPopularCursor(article: ArticleView): PopularCursor =
         PopularCursor(
             stocksCount = article.stocksCount,
             publishedAt = article.publishedAt.format(CURSOR_FORMATTER),
             id = article.id ?: 0,
         )
 
-    private fun toRandomCursor(article: TechArticle): RandomCursor =
+    private fun toRandomCursor(article: ArticleView): RandomCursor =
         RandomCursor(
             randomKey = article.randomKey,
             id = article.id ?: 0,
