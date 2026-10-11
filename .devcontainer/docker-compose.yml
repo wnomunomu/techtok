@@ -20,7 +20,7 @@ services:
       - APP_SUMMARY_SOURCE_WORD_LIMIT=100
       - APP_RANDOM_REFRESH_CRON=0 0 3 * * *
       - APP_RANDOM_REFRESH_LIMIT=300
-      - OPENAI_MODEL=gpt-5-nano
+      - OPENAI_MODEL=gpt-6-luna
       - NODE_ENV=development
     ports:
       - "5173:5173"
