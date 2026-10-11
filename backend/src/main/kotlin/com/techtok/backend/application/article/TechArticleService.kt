@@ -15,16 +15,23 @@ import com.techtok.backend.domain.techarticle.TechArticle
 import com.techtok.backend.domain.techarticle.TechArticleRepository
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpHeaders
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.util.UriComponentsBuilder
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
 
 @Service
@@ -33,6 +40,10 @@ class TechArticleService(
     private val webClient: WebClient,
     private val openAiService: OpenAiService,
     private val objectMapper: ObjectMapper,
+    @Value("\${app.article-retention-days}") private val retentionDays: Long,
+    @Value("\${app.summary-source-word-limit}") private val summarySourceWordLimit: Int,
+    @Value("\${app.fetch-interval-days}") private val fetchIntervalDays: Long,
+    @Value("\${app.article-cleanup-interval-days}") private val cleanupIntervalDays: Long,
 ) {
     private val logger = LoggerFactory.getLogger(TechArticleService::class.java)
 
@@ -42,36 +53,85 @@ class TechArticleService(
     @Value("\${app.qiita.access-token:}")
     private var qiitaAccessToken: String = ""
 
+    private val batchRunning = AtomicBoolean(false)
+
+    init {
+        require(retentionDays > 0) { "APP_ARTICLE_RETENTION_DAYS must be positive" }
+        require(summarySourceWordLimit > 0) { "APP_SUMMARY_SOURCE_WORD_LIMIT must be positive" }
+        require(fetchIntervalDays > 0) { "APP_FETCH_INTERVAL_DAYS must be positive" }
+        require(cleanupIntervalDays > 0) { "APP_ARTICLE_CLEANUP_INTERVAL_DAYS must be positive" }
+    }
+
     companion object {
         private const val QIITA_API_URL = "https://qiita.com/api/v2/items"
         private val ISO_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME
         private val CURSOR_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME
         private const val PER_PAGE = 100
-        private const val POPULAR_QUERY = "stocks:>=50"
-        private const val POPULAR_MAX_PAGES = 3
+        private const val SUMMARY_BATCH_SIZE = 100
+        private const val SUMMARY_CONCURRENCY = 3
+        private val ARTICLE_ZONE = ZoneId.of("Asia/Tokyo")
         private const val MAX_PAGES = 100
         private const val DEFAULT_LIMIT = 20
     }
 
-    @Scheduled(fixedRateString = "\${app.fetch-rate-ms}")
+    @Scheduled(fixedRateString = "\${app.fetch-interval-days}d")
     fun fetchAndSaveArticles() {
+        if (!batchRunning.compareAndSet(false, true)) {
+            return
+        }
         try {
-            logger.info("Fetching articles from Qiita API (latest)")
-            val latestPublishedAt = techArticleRepository.findTopByOrderByPublishedAtDesc()?.publishedAt
-            val latestArticles = fetchQiitaItems(null, latestPublishedAt)
-            latestArticles.forEach { qiitaArticle ->
-                upsertFromQiita(qiitaArticle)
+            try {
+                logger.info("Fetching articles from Qiita API")
+                fetchQiitaItems(retentionCutoff())
+                logger.info("Finished fetching articles from Qiita API")
+            } catch (e: Exception) {
+                logger.error("Error fetching articles from Qiita API", e)
             }
-
-            logger.info("Fetching articles from Qiita API (popular)")
-            val popularArticles = fetchQiitaItems(POPULAR_QUERY, null, POPULAR_MAX_PAGES)
-            popularArticles.forEach { qiitaArticle ->
-                upsertFromQiita(qiitaArticle)
-            }
-
-            logger.info("Finished processing articles from Qiita API")
+            summarizePendingArticles()
         } catch (e: Exception) {
-            logger.error("Error fetching articles from Qiita API", e)
+            logger.error("Error processing pending article summaries", e)
+        } finally {
+            batchRunning.set(false)
+        }
+    }
+
+    internal fun retentionCutoff(now: LocalDateTime = LocalDateTime.now(ARTICLE_ZONE)): LocalDateTime = now.minusDays(retentionDays)
+
+    @Scheduled(fixedRateString = "\${app.article-cleanup-interval-days}d")
+    fun deleteExpiredArticles() {
+        try {
+            val deletedRows = techArticleRepository.deleteExpired(retentionCutoff())
+            logger.info("Deleted $deletedRows expired articles")
+        } catch (e: Exception) {
+            logger.error("Error deleting expired articles", e)
+        }
+    }
+
+    private fun summarizePendingArticles() {
+        Executors.newFixedThreadPool(SUMMARY_CONCURRENCY).use { executor ->
+            var afterId = 0L
+            while (true) {
+                val articles = techArticleRepository.findPendingSummaries(afterId, PageRequest.of(0, SUMMARY_BATCH_SIZE))
+                if (articles.isEmpty()) {
+                    return
+                }
+                val tasks =
+                    articles.map { article ->
+                        executor.submit {
+                            try {
+                                val summary = openAiService.generateSummary(article.summarySource)
+                                if (!summary.isNullOrBlank()) {
+                                    techArticleRepository.saveSummary(article.id, summary)
+                                    logger.info("Summarized article: ${article.id}")
+                                }
+                            } catch (e: Exception) {
+                                logger.error("Error summarizing article: ${article.id}", e)
+                            }
+                        }
+                    }
+                tasks.forEach { it.get() }
+                afterId = articles.last().id
+            }
         }
     }
 
@@ -82,56 +142,75 @@ class TechArticleService(
         logger.info("Refreshed random_key for $updatedRows articles")
     }
 
-    private fun fetchQiitaItems(
-        query: String?,
-        stopAtPublishedAt: LocalDateTime?,
-        maxPages: Int = MAX_PAGES,
-    ): List<QiitaArticle> {
-        val results = mutableListOf<QiitaArticle>()
-        var page = 1
-        var hasNext = true
+    private fun fetchQiitaItems(cutoff: LocalDateTime) {
+        fetchQiitaRange(cutoff.toLocalDate(), LocalDate.now(ARTICLE_ZONE), cutoff)
+    }
 
-        while (hasNext) {
-            val uriBuilder =
+    private fun fetchQiitaRange(
+        from: LocalDate,
+        through: LocalDate,
+        cutoff: LocalDateTime,
+    ) {
+        for (page in 1..MAX_PAGES) {
+            val uri =
                 UriComponentsBuilder
                     .fromHttpUrl(QIITA_API_URL)
                     .queryParam("page", page)
                     .queryParam("per_page", PER_PAGE)
-            if (!query.isNullOrBlank()) {
-                uriBuilder.queryParam("query", query)
-            }
-
-            var request =
-                webClient
-                    .get()
-                    .uri(uriBuilder.build().encode().toUri())
+                    .queryParam("query", "created:>=$from created:<=$through")
+                    .build()
+                    .encode()
+                    .toUri()
+            var request = webClient.get().uri(uri)
             if (qiitaAccessToken.isNotBlank()) {
                 request = request.header(HttpHeaders.AUTHORIZATION, "Bearer $qiitaAccessToken")
             }
-            val response =
-                request
-                    .retrieve()
-                    .toEntityList(QiitaArticle::class.java)
-                    .block()
-
-            val items = response?.body ?: emptyList()
-            results.addAll(items)
-
-            hasNext = hasNextPage(response?.headers)
-            if (!items.isEmpty() && stopAtPublishedAt != null) {
-                val oldestPublishedAt = LocalDateTime.parse(items.last().createdAt, ISO_FORMATTER)
-                if (oldestPublishedAt.isBefore(stopAtPublishedAt)) {
-                    hasNext = false
+            val response = request.retrieve().toEntityList(QiitaArticle::class.java).block()
+            val totalCount = response?.headers?.getFirst("Total-Count")?.toLongOrNull()
+            if (totalCount != null && totalCount > PER_PAGE * MAX_PAGES && from < through) {
+                splitQiitaRange(from, through, cutoff)
+                return
+            }
+            response?.body.orEmpty().forEach { article ->
+                if (!parseQiitaDate(article.createdAt).isBefore(cutoff)) {
+                    upsertFromQiita(article)
                 }
             }
-            if (page >= maxPages) {
-                hasNext = false
+            // A capped API response may omit the next link even when articles remain.
+            if (page == MAX_PAGES && response?.body.orEmpty().size == PER_PAGE && totalCount != (PER_PAGE * MAX_PAGES).toLong()) {
+                splitQiitaRange(from, through, cutoff)
+                return
             }
-            page += 1
+            if (!hasNextPage(response?.headers)) {
+                return
+            }
         }
-
-        return results
     }
+
+    private fun splitQiitaRange(
+        from: LocalDate,
+        through: LocalDate,
+        cutoff: LocalDateTime,
+    ) {
+        check(from < through) { "Qiita API page limit reached for a single day: $from; some articles could not be fetched" }
+        val midpoint = from.plusDays(ChronoUnit.DAYS.between(from, through) / 2)
+        logger.info("Splitting Qiita fetch range: $from through $through")
+        fetchQiitaRange(midpoint.plusDays(1), through, cutoff)
+        fetchQiitaRange(from, midpoint, cutoff)
+    }
+
+    // Existing Qiita timestamps were stored as JST wall-clock values without an offset.
+    private fun parseQiitaDate(value: String): LocalDateTime =
+        OffsetDateTime.parse(value, ISO_FORMATTER).atZoneSameInstant(ARTICLE_ZONE).toLocalDateTime()
+
+    internal fun extractSummarySource(text: String): String =
+        text
+            .replace(Regex("<[^>]*>"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .split(" ")
+            .take(summarySourceWordLimit)
+            .joinToString(" ")
 
     private fun hasNextPage(headers: HttpHeaders?): Boolean {
         val linkHeader = headers?.getFirst(HttpHeaders.LINK) ?: return false
@@ -141,8 +220,8 @@ class TechArticleService(
     private fun upsertFromQiita(qiitaArticle: QiitaArticle) {
         val sourceUrl = qiitaArticle.url
         val qiitaId = qiitaArticle.id
-        val updatedAt = LocalDateTime.parse(qiitaArticle.updatedAt, ISO_FORMATTER)
-        val publishedAt = LocalDateTime.parse(qiitaArticle.createdAt, ISO_FORMATTER)
+        val updatedAt = parseQiitaDate(qiitaArticle.updatedAt)
+        val publishedAt = parseQiitaDate(qiitaArticle.createdAt)
 
         val existing =
             techArticleRepository.findByQiitaId(qiitaId)
@@ -159,7 +238,6 @@ class TechArticleService(
             return
         }
 
-        val summary = openAiService.generateSummary(qiitaArticle.renderedBody)
         val techArticle =
             TechArticle(
                 sourceUrl = sourceUrl,
@@ -169,7 +247,8 @@ class TechArticleService(
                 publishedAt = publishedAt,
                 updatedAt = updatedAt,
                 stocksCount = qiitaArticle.stocksCount,
-                summary = summary,
+                summary = null,
+                summarySource = extractSummarySource(qiitaArticle.renderedBody),
             )
 
         techArticleRepository.save(techArticle)

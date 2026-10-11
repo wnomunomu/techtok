@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.WebClientResponseException
 import org.springframework.web.reactive.function.client.bodyToMono
 
 @Service
@@ -23,10 +24,9 @@ class OpenAiService(
         private const val OPENAI_API_URL = "https://api.openai.com/v1/responses"
     }
 
-    fun generateSummary(renderedBody: String): String {
+    fun generateSummary(summarySource: String): String? {
         try {
             logger.info("API Key loaded: ${if (apiKey.isNotEmpty()) "Yes (${apiKey.length} chars)" else "No - empty or null"}")
-            val first100Words = extractFirst100Words(renderedBody)
 
             val requestBody =
                 OpenAiRequest(
@@ -42,7 +42,7 @@ class OpenAiService(
                                         "- 前置き（例:「このブログは」「この記事では」など）は禁止。\n" +
                                         "- 冗長な表現を避け、要点を出力。" +
                                         "\n<本文>\n" +
-                                        first100Words,
+                                        summarySource,
                             ),
                         ),
                     maxOutputTokens = 250,
@@ -61,10 +61,17 @@ class OpenAiService(
                     .bodyToMono<OpenAiResponse>()
                     .block()
 
-            return extractOutputText(response) ?: "Unable to generate summary"
+            return extractOutputText(response)
         } catch (e: Exception) {
+            if (e is WebClientResponseException) {
+                logger.error(
+                    "OpenAI API error: status={}, body={}",
+                    e.statusCode.value(),
+                    e.responseBodyAsString,
+                )
+            }
             logger.error("Error generating summary with OpenAI", e)
-            return "Summary generation failed"
+            return null
         }
     }
 
@@ -81,18 +88,6 @@ class OpenAiService(
             .firstOrNull { !it.text.isNullOrBlank() }
             ?.text
             ?.trim()
-    }
-
-    private fun extractFirst100Words(text: String): String {
-        // Remove HTML tags and extract plain text
-        val plainText =
-            text
-                .replace(Regex("<[^>]*>"), " ")
-                .replace(Regex("\\s+"), " ")
-                .trim()
-
-        val words = plainText.split(" ")
-        return words.take(100).joinToString(" ")
     }
 }
 
