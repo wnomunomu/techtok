@@ -1,6 +1,6 @@
 services:
   app:
-    image: mcr.microsoft.com/devcontainers/java:1-21-bullseye
+    image: mcr.microsoft.com/devcontainers/java:3-21-bookworm
     container_name: techtok-app
     volumes:
       - ..:/workspace:cached
@@ -14,10 +14,13 @@ services:
       - SPRING_DATASOURCE_PASSWORD=secret
       - SPRING_PROFILES_ACTIVE=local
       - APP_CORS_ALLOWED_ORIGIN=http://localhost:5173
-      - APP_FETCH_RATE_MS=20000000
+      - APP_FETCH_INTERVAL_DAYS=7
+      - APP_ARTICLE_CLEANUP_INTERVAL_DAYS=7
+      - APP_ARTICLE_RETENTION_DAYS=30
+      - APP_SUMMARY_SOURCE_WORD_LIMIT=100
       - APP_RANDOM_REFRESH_CRON=0 0 3 * * *
       - APP_RANDOM_REFRESH_LIMIT=300
-      - OPENAI_MODEL=gpt-5-nano
+      - OPENAI_MODEL=gpt-6-luna
       - NODE_ENV=development
     ports:
       - "5173:5173"

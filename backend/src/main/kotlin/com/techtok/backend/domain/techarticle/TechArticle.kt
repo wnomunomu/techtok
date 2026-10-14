@@ -22,9 +22,10 @@ data class TechArticle(
     @NotBlank(message = "タイトルは必須です")
     @Size(max = 200, message = "タイトルは200文字以内で入力してください")
     val title: String,
-    @Column(name = "summary", nullable = false, columnDefinition = "TEXT")
-    @NotBlank(message = "要約は必須です")
-    val summary: String,
+    @Column(name = "summary", columnDefinition = "TEXT")
+    val summary: String?,
+    @Column(name = "summary_source", columnDefinition = "TEXT")
+    val summarySource: String? = null,
     @Column(name = "author", nullable = false, length = 100)
     @NotBlank(message = "著者は必須です")
     @Size(max = 100, message = "著者は100文字以内で入力してください")
