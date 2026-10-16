@@ -46,7 +46,7 @@ class OpenAiService(
                             ),
                         ),
                     maxOutputTokens = 250,
-                    reasoning = OpenAiReasoning(effort = "low"),
+                    reasoning = OpenAiReasoning(effort = "none"),
                     text = OpenAiText(verbosity = "low"),
                 )
 

@@ -15,12 +15,15 @@ import com.techtok.backend.domain.techarticle.TechArticle
 import com.techtok.backend.domain.techarticle.TechArticleRepository
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.core.io.buffer.DataBufferLimitException
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpHeaders
+import org.springframework.http.ResponseEntity
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.client.WebClientResponseException
 import org.springframework.web.util.UriComponentsBuilder
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -165,15 +168,29 @@ class TechArticleService(
             if (qiitaAccessToken.isNotBlank()) {
                 request = request.header(HttpHeaders.AUTHORIZATION, "Bearer $qiitaAccessToken")
             }
-            val response = request.retrieve().toEntityList(QiitaArticle::class.java).block()
+            val response =
+                try {
+                    request.retrieve().toEntityList(QiitaArticle::class.java).block()
+                } catch (e: WebClientResponseException) {
+                    if (generateSequence<Throwable>(e) { it.cause }.none { it is DataBufferLimitException }) {
+                        throw e
+                    }
+                    logger.error("Skipping oversized Qiita response: range=$from through $through, page=$page, uri=$uri", e)
+                    // Preserve pagination headers so a decoding failure does not abort older pages.
+                    ResponseEntity(emptyList<QiitaArticle>(), e.headers, e.statusCode)
+                }
             val totalCount = response?.headers?.getFirst("Total-Count")?.toLongOrNull()
             if (totalCount != null && totalCount > PER_PAGE * MAX_PAGES && from < through) {
                 splitQiitaRange(from, through, cutoff)
                 return
             }
             response?.body.orEmpty().forEach { article ->
-                if (!parseQiitaDate(article.createdAt).isBefore(cutoff)) {
-                    upsertFromQiita(article)
+                try {
+                    if (!parseQiitaDate(article.createdAt).isBefore(cutoff)) {
+                        upsertFromQiita(article)
+                    }
+                } catch (e: Exception) {
+                    logger.error("Skipping Qiita article: id=${article.id}, url=${article.url}", e)
                 }
             }
             // A capped API response may omit the next link even when articles remain.
